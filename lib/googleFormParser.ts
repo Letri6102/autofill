@@ -200,22 +200,36 @@ export function parseGoogleFormHtml(html: string, sourceUrl: string): ParsedGoog
     const itemType = typeof rawItem[3] === "number" ? rawItem[3] : null;
     const details = rawItem[4];
 
-    // Section/page title usually has no entry details, or has type 8.
+    // Google Forms marks a new section/page with item type 8.
     const hasEntryDetails = Array.isArray(details) && details.length > 0;
-    const isSectionHeader = itemType === 8 || !hasEntryDetails;
+    const isSectionHeader = itemType === 8;
 
     if (isSectionHeader) {
       if (itemTitle || itemDescription) {
-        currentSection = {
-          sectionIndex: sections.length + 1,
-          sectionTitle: itemTitle || `Section ${sections.length + 1}`,
-          sectionDescription: itemDescription,
-          questions: [],
-        };
-        sections.push(currentSection);
+        const isInitialEmptySection =
+          sections.length === 1 &&
+          currentSection === sections[0] &&
+          currentSection.questions.length === 0 &&
+          currentSection.sectionTitle === "Section 1" &&
+          !currentSection.sectionDescription;
+
+        if (isInitialEmptySection) {
+          currentSection.sectionTitle = itemTitle || "Section 1";
+          currentSection.sectionDescription = itemDescription;
+        } else {
+          currentSection = {
+            sectionIndex: sections.length + 1,
+            sectionTitle: itemTitle || `Section ${sections.length + 1}`,
+            sectionDescription: itemDescription,
+            questions: [],
+          };
+          sections.push(currentSection);
+        }
       }
       continue;
     }
+
+    if (!hasEntryDetails) continue;
 
     if (!Array.isArray(details)) continue;
 
