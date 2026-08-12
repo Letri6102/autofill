@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type ParsedQuestion = {
   questionOrder: number;
@@ -59,12 +59,31 @@ type SubmissionLog = {
   status: number | null;
   message: string;
   payload: Record<string, string>;
+  sourceRow?: number;
 };
+
+type ImportedData = {
+  fileName: string;
+  headers: string[];
+  rows: Record<string, string>[];
+  rowCount: number;
+  previewRows: Record<string, string>[];
+};
+
+type DataFileResponse =
+  | {
+      ok: true;
+      data: ImportedData;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
 
 const DEMO_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSfh2fFBszKCwNAwF2gh6RQBlYkcQFaJaCPwb8Hc9lJb7kQY3g/viewform";
 
-const MAX_FORM_COUNT = 50;
+const MAX_FORM_COUNT = 1000;
 const MIN_DELAY_SECONDS = 10;
 const MAX_DELAY_SECONDS = 3600;
 const QUESTIONS_PER_PAGE = 5;
@@ -91,6 +110,43 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
 }
 
+function parseTextAnswers(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((answer) => answer.trim())
+    .filter(Boolean);
+}
+
+function normalizeMatchKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function buildAutoColumnMapping(questions: ParsedQuestion[], headers: string[]): Record<string, string> {
+  const headerByKey = new Map(headers.map((header) => [normalizeMatchKey(header), header]));
+  const mapping: Record<string, string> = {};
+
+  for (const question of questions) {
+    const titleCode = question.questionText.match(/^([A-Za-z]+\d+)(?:[\s.:-]|$)/)?.[1];
+    const candidates = [
+      question.entry,
+      question.entry.replace(/^entry\./, ""),
+      question.questionText,
+      titleCode ?? "",
+    ];
+    const matchedHeader = candidates.map(normalizeMatchKey).map((key) => headerByKey.get(key)).find(Boolean);
+
+    if (matchedHeader) {
+      mapping[question.entry] = matchedHeader;
+    }
+  }
+
+  return mapping;
+}
+
 export default function HomePage() {
   const [formUrl, setFormUrl] = useState(DEMO_URL);
   const [data, setData] = useState<ParsedGoogleForm | null>(null);
@@ -107,6 +163,14 @@ export default function HomePage() {
   const [submitLogs, setSubmitLogs] = useState<SubmissionLog[]>([]);
   const [delayRemaining, setDelayRemaining] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [importedData, setImportedData] = useState<ImportedData | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+  const [textAnswerBanks, setTextAnswerBanks] = useState<Record<string, string>>({});
+  const [fileStartLine, setFileStartLine] = useState(2);
+  const [completedCount, setCompletedCount] = useState(0);
+  const [submitTargetCount, setSubmitTargetCount] = useState(0);
   const cancelSubmissionRef = useRef(false);
 
   const totalQuestions = useMemo(() => {
@@ -114,10 +178,45 @@ export default function HomePage() {
     return data.sections.reduce((sum, section) => sum + section.questions.length, 0);
   }, [data]);
 
-  const optionQuestions = useMemo(() => {
+  const allQuestions = useMemo(() => {
     if (!data) return [];
-    return data.sections.flatMap((section) => section.questions).filter((question) => question.options.length > 0);
+    return data.sections.flatMap((section) => section.questions);
   }, [data]);
+
+  const optionQuestions = useMemo(() => {
+    return allQuestions.filter((question) => question.options.length > 0);
+  }, [allQuestions]);
+
+  const textAnswerEntries = useMemo(() => {
+    return new Set(
+      Object.entries(textAnswerBanks)
+        .filter(([, answers]) => parseTextAnswers(answers).length > 0)
+        .map(([entry]) => entry),
+    );
+  }, [textAnswerBanks]);
+
+  const mappedEntries = useMemo(() => {
+    if (!importedData) return new Set<string>();
+    const headers = new Set(importedData.headers);
+    return new Set(
+      Object.entries(columnMapping)
+        .filter(([, header]) => header && headers.has(header))
+        .map(([entry]) => entry),
+    );
+  }, [columnMapping, importedData]);
+
+  const hasImportedMapping = Boolean(importedData && mappedEntries.size > 0);
+  const hasTextAnswerBank = textAnswerEntries.size > 0;
+  const fileStartIndex = Math.max(0, Math.floor(fileStartLine) - 2);
+  const availableFileRows = importedData ? Math.max(0, importedData.rowCount - fileStartIndex) : 0;
+  const plannedSubmitCount =
+    Number.isFinite(formCount) && formCount > 0 ? Math.min(MAX_FORM_COUNT, Math.floor(formCount)) : 0;
+  const progressTotal = submitTargetCount || plannedSubmitCount;
+  const displayFileStartLine = Number.isFinite(fileStartLine) ? Math.floor(fileStartLine) : 2;
+  const fileRunEndLine =
+    hasImportedMapping && importedData && plannedSubmitCount > 0
+      ? Math.min(displayFileStartLine + plannedSubmitCount - 1, importedData.rowCount + 1)
+      : null;
 
   useEffect(() => {
     if (!data) {
@@ -125,6 +224,11 @@ export default function HomePage() {
       setPageHistoryValue("0");
       setSubmitLogs([]);
       setSubmitError("");
+      setColumnMapping({});
+      setTextAnswerBanks({});
+      setCompletedCount(0);
+      setSubmitTargetCount(0);
+      setFileStartLine(2);
       return;
     }
 
@@ -141,8 +245,20 @@ export default function HomePage() {
     setPageHistoryValue(data.pageHistory || "0");
     setSubmitLogs([]);
     setSubmitError("");
+    setTextAnswerBanks({});
+    setCompletedCount(0);
+    setSubmitTargetCount(0);
     setCurrentPage(1);
   }, [data]);
+
+  useEffect(() => {
+    if (!importedData || allQuestions.length === 0) {
+      setColumnMapping({});
+      return;
+    }
+
+    setColumnMapping(buildAutoColumnMapping(allQuestions, importedData.headers));
+  }, [allQuestions, importedData]);
 
   const filteredSections = useMemo(() => {
     if (!data) return [];
@@ -218,29 +334,70 @@ export default function HomePage() {
 
   const submitConfigError = useMemo(() => {
     if (!data) return "Chưa có dữ liệu form.";
-    if (optionQuestions.length === 0) return "Form chưa có câu hỏi dạng options để tạo payload tự động.";
+    if (optionQuestions.length === 0 && !hasImportedMapping && !hasTextAnswerBank) {
+      return "Form chưa có options, dữ liệu file hoặc câu trả lời nhập tay để tạo payload tự động.";
+    }
     if (formCount < 1 || formCount > MAX_FORM_COUNT) {
       return `Số lượng form phải từ 1 đến ${MAX_FORM_COUNT}.`;
+    }
+    if (hasImportedMapping && importedData) {
+      if (fileStartLine < 2 || fileStartLine > importedData.rowCount + 1) {
+        return `Dòng file bắt đầu phải từ 2 đến ${importedData.rowCount + 1}.`;
+      }
+      if (formCount > availableFileRows) {
+        return `Từ dòng ${fileStartLine}, file chỉ còn ${availableFileRows} dòng dữ liệu.`;
+      }
     }
     if (delayMinSeconds < MIN_DELAY_SECONDS || delayMaxSeconds > MAX_DELAY_SECONDS) {
       return `Delay phải nằm trong khoảng ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS} giây.`;
     }
     if (delayMinSeconds > delayMaxSeconds) return "Delay bắt đầu không được lớn hơn delay kết thúc.";
 
-    const invalidQuestion = optionQuestions.find(
-      (question) =>
-        question.options.reduce(
-          (sum, option) => sum + (Number(optionWeights[question.entry]?.[option]) || 0),
-          0,
-        ) !== 100,
-    );
+    const invalidQuestion = optionQuestions
+      .filter((question) => !mappedEntries.has(question.entry))
+      .find(
+        (question) =>
+          question.options.reduce(
+            (sum, option) => sum + (Number(optionWeights[question.entry]?.[option]) || 0),
+            0,
+          ) !== 100,
+      );
     if (invalidQuestion) {
       return `Tổng tỉ lệ của "${invalidQuestion.questionText || invalidQuestion.entry}" phải bằng 100%.`;
     }
 
+    const missingRequiredTextQuestion = allQuestions.find(
+      (question) =>
+        question.required &&
+        question.options.length === 0 &&
+        !mappedEntries.has(question.entry) &&
+        !textAnswerEntries.has(question.entry),
+    );
+    if (missingRequiredTextQuestion) {
+      return `Câu bắt buộc "${
+        missingRequiredTextQuestion.questionText || missingRequiredTextQuestion.entry
+      }" cần map cột dữ liệu hoặc nhập danh sách câu trả lời.`;
+    }
+
     if (!pageHistoryValue.trim()) return "pageHistory không được để trống.";
     return "";
-  }, [data, delayMaxSeconds, delayMinSeconds, formCount, optionQuestions, optionWeights, pageHistoryValue]);
+  }, [
+    data,
+    allQuestions,
+    delayMaxSeconds,
+    delayMinSeconds,
+    availableFileRows,
+    fileStartLine,
+    formCount,
+    hasImportedMapping,
+    hasTextAnswerBank,
+    importedData,
+    mappedEntries,
+    optionQuestions,
+    optionWeights,
+    pageHistoryValue,
+    textAnswerEntries,
+  ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -269,6 +426,64 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleDataFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportLoading(true);
+    setImportError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/parse-data-file", {
+        method: "POST",
+        body: formData,
+      });
+      const result = (await response.json()) as DataFileResponse;
+
+      if (!result.ok) {
+        setImportError(result.message || "Không đọc được file dữ liệu.");
+        setImportedData(null);
+        return;
+      }
+
+      setImportedData(result.data);
+      setFileStartLine(2);
+      setFormCount(Math.min(result.data.rowCount || 1, MAX_FORM_COUNT));
+      setCompletedCount(0);
+      setSubmitTargetCount(0);
+    } catch {
+      setImportError("Không gọi được API đọc file dữ liệu.");
+      setImportedData(null);
+    } finally {
+      setImportLoading(false);
+      event.target.value = "";
+    }
+  }
+
+  function clearImportedData() {
+    setImportedData(null);
+    setImportError("");
+    setColumnMapping({});
+    setFileStartLine(2);
+  }
+
+  function updateColumnMapping(question: ParsedQuestion, header: string) {
+    setColumnMapping((current) => ({
+      ...current,
+      [question.entry]: header,
+    }));
+  }
+
+  function updateTextAnswerBank(question: ParsedQuestion, value: string) {
+    setTextAnswerBanks((current) => ({
+      ...current,
+      [question.entry]: value,
+    }));
   }
 
   function updateOptionWeight(question: ParsedQuestion, option: string, nextWeight: number) {
@@ -304,13 +519,32 @@ export default function HomePage() {
     return weightedOptions.at(-1)?.option ?? null;
   }
 
-  function buildSubmissionPayload(): Record<string, string> {
-    const payload: Record<string, string> = {};
+  function chooseTextAnswer(question: ParsedQuestion): string | null {
+    const answers = parseTextAnswers(textAnswerBanks[question.entry] ?? "");
+    if (answers.length === 0) return null;
+    return answers[randomInt(0, answers.length - 1)];
+  }
 
-    for (const question of optionQuestions) {
-      const selectedOption = chooseWeightedOption(question);
-      if (selectedOption) {
-        payload[question.entry] = selectedOption;
+  function buildSubmissionPayload(rowIndex?: number): Record<string, string> {
+    const payload: Record<string, string> = {};
+    const row = rowIndex !== undefined ? importedData?.rows[rowIndex] : undefined;
+
+    for (const question of allQuestions) {
+      const mappedHeader = columnMapping[question.entry];
+      const importedValue = mappedHeader && row ? row[mappedHeader]?.trim() : "";
+
+      if (importedValue) {
+        payload[question.entry] = importedValue;
+      } else if (question.options.length > 0) {
+        const selectedOption = chooseWeightedOption(question);
+        if (selectedOption) {
+          payload[question.entry] = selectedOption;
+        }
+      } else {
+        const selectedTextAnswer = chooseTextAnswer(question);
+        if (selectedTextAnswer) {
+          payload[question.entry] = selectedTextAnswer;
+        }
       }
     }
 
@@ -345,12 +579,19 @@ export default function HomePage() {
     const count = Math.floor(clampNumber(formCount, 1, MAX_FORM_COUNT));
     const minDelay = Math.floor(clampNumber(delayMinSeconds, MIN_DELAY_SECONDS, MAX_DELAY_SECONDS));
     const maxDelay = Math.floor(clampNumber(delayMaxSeconds, MIN_DELAY_SECONDS, MAX_DELAY_SECONDS));
+    const safeFileStartLine =
+      hasImportedMapping && importedData
+        ? Math.floor(clampNumber(fileStartLine, 2, importedData.rowCount + 1))
+        : 2;
 
     setFormCount(count);
+    setFileStartLine(safeFileStartLine);
     setDelayMinSeconds(minDelay);
     setDelayMaxSeconds(maxDelay);
     setSubmitLogs([]);
     setSubmitError("");
+    setCompletedCount(0);
+    setSubmitTargetCount(count);
     setSubmitting(true);
     setDelayRemaining(null);
     cancelSubmissionRef.current = false;
@@ -359,7 +600,8 @@ export default function HomePage() {
       for (let index = 1; index <= count; index += 1) {
         if (cancelSubmissionRef.current) break;
 
-        const payload = buildSubmissionPayload();
+        const sourceRow = hasImportedMapping ? safeFileStartLine + index - 1 : undefined;
+        const payload = buildSubmissionPayload(sourceRow !== undefined ? sourceRow - 2 : undefined);
         const response = await fetch("/api/submit-form", {
           method: "POST",
           headers: {
@@ -383,6 +625,7 @@ export default function HomePage() {
               status,
               message,
               payload,
+              sourceRow,
             },
             ...current,
           ].slice(0, 20),
@@ -392,6 +635,8 @@ export default function HomePage() {
           setSubmitError(message);
           break;
         }
+
+        setCompletedCount((current) => current + 1);
 
         if (index < count) {
           const shouldContinue = await waitSeconds(randomInt(minDelay, maxDelay));
@@ -486,7 +731,11 @@ export default function HomePage() {
                     Dừng
                   </button>
                 ) : null}
-                <button type="button" disabled={submitting || Boolean(submitConfigError)} onClick={submitGeneratedPayloads}>
+                <button
+                  type="button"
+                  disabled={submitting || Boolean(submitConfigError)}
+                  onClick={submitGeneratedPayloads}
+                >
                   {submitting ? "Đang submit..." : "Submit form"}
                 </button>
               </div>
@@ -495,7 +744,11 @@ export default function HomePage() {
             <div className="submit-controls">
               <label>
                 <span>pageHistory</span>
-                <input value={pageHistoryValue} onChange={(event) => setPageHistoryValue(event.target.value)} />
+                <input
+                  value={pageHistoryValue}
+                  disabled={submitting}
+                  onChange={(event) => setPageHistoryValue(event.target.value)}
+                />
               </label>
               <label>
                 <span>Số lượng form</span>
@@ -503,18 +756,43 @@ export default function HomePage() {
                   type="number"
                   min={1}
                   max={MAX_FORM_COUNT}
+                  disabled={submitting}
                   value={formCount}
-                  onChange={(event) =>
-                    setFormCount(Number.isFinite(event.target.valueAsNumber) ? event.target.valueAsNumber : 0)
-                  }
+                  onChange={(event) => {
+                    setFormCount(Number.isFinite(event.target.valueAsNumber) ? event.target.valueAsNumber : 0);
+                    setCompletedCount(0);
+                    setSubmitTargetCount(0);
+                  }}
                 />
               </label>
+              {importedData ? (
+                <label>
+                  <span>Dòng file bắt đầu</span>
+                  <input
+                    type="number"
+                    min={2}
+                    max={importedData.rowCount + 1}
+                    step={1}
+                    disabled={submitting}
+                    value={fileStartLine}
+                    onChange={(event) => {
+                      const nextLine = Number.isFinite(event.target.valueAsNumber)
+                        ? Math.floor(event.target.valueAsNumber)
+                        : 2;
+                      setFileStartLine(nextLine);
+                      setCompletedCount(0);
+                      setSubmitTargetCount(0);
+                    }}
+                  />
+                </label>
+              ) : null}
               <label>
                 <span>Delay từ (giây)</span>
                 <input
                   type="number"
                   min={MIN_DELAY_SECONDS}
                   max={MAX_DELAY_SECONDS}
+                  disabled={submitting}
                   value={delayMinSeconds}
                   onChange={(event) =>
                     setDelayMinSeconds(Number.isFinite(event.target.valueAsNumber) ? event.target.valueAsNumber : 0)
@@ -527,6 +805,7 @@ export default function HomePage() {
                   type="number"
                   min={MIN_DELAY_SECONDS}
                   max={MAX_DELAY_SECONDS}
+                  disabled={submitting}
                   value={delayMaxSeconds}
                   onChange={(event) =>
                     setDelayMaxSeconds(Number.isFinite(event.target.valueAsNumber) ? event.target.valueAsNumber : 0)
@@ -537,7 +816,81 @@ export default function HomePage() {
 
             {submitConfigError ? <p className="submit-warning">{submitConfigError}</p> : null}
             {submitError ? <p className="submit-warning">{submitError}</p> : null}
-            {delayRemaining !== null ? <p className="submit-status">Đợi {delayRemaining} giây trước lượt tiếp theo.</p> : null}
+            {delayRemaining !== null ? (
+              <p className="submit-status">Đợi {delayRemaining} giây trước lượt tiếp theo.</p>
+            ) : null}
+
+            <div className="submit-progress" aria-live="polite">
+              <div>
+                <span>Hoàn tất</span>
+                <strong>
+                  {completedCount} / {progressTotal} form
+                </strong>
+              </div>
+              {fileRunEndLine ? (
+                <div>
+                  <span>Dòng file</span>
+                  <strong>
+                    {displayFileStartLine} - {fileRunEndLine}
+                  </strong>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="data-import-panel">
+              <div className="data-import-header">
+                <div>
+                  <p className="eyebrow">Data file</p>
+                  <h4>CSV / Excel</h4>
+                </div>
+                {importedData ? (
+                  <button className="secondary-button" type="button" onClick={clearImportedData}>
+                    Xóa file
+                  </button>
+                ) : null}
+              </div>
+
+              <label className="file-picker">
+                <span>{importLoading ? "Đang đọc file..." : "Chọn file CSV/XLSX"}</span>
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  disabled={importLoading}
+                  onChange={handleDataFileChange}
+                />
+              </label>
+
+              {importError ? <p className="submit-warning">{importError}</p> : null}
+
+              {importedData ? (
+                <div className="import-summary">
+                  <p>
+                    {importedData.fileName} · {importedData.rowCount} dòng dữ liệu ·{" "}
+                    {importedData.headers.length} cột · {mappedEntries.size} entry đã map
+                  </p>
+                  <div className="data-preview">
+                    <table>
+                      <thead>
+                        <tr>
+                          {importedData.headers.slice(0, 8).map((header) => (
+                            <th key={header}>{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importedData.previewRows.map((row, index) => (
+                          <tr key={`${importedData.fileName}-${index}`}>
+                            {importedData.headers.slice(0, 8).map((header) => (
+                              <td key={header}>{row[header]}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             {submitLogs.length > 0 ? (
               <div className="submit-log-list">
@@ -546,7 +899,10 @@ export default function HomePage() {
                     <span>#{log.index}</span>
                     <strong>{log.ok ? "OK" : "Lỗi"}</strong>
                     <code>{log.status ?? "-"}</code>
-                    <span>{log.message}</span>
+                    <span>
+                      {log.message}
+                      {log.sourceRow ? ` · Dòng file ${log.sourceRow}` : ""}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -618,6 +974,23 @@ export default function HomePage() {
                         <code>{question.entry}</code>
                       </div>
 
+                      {importedData ? (
+                        <label className="column-mapping-row">
+                          <span>Cột dữ liệu</span>
+                          <select
+                            value={columnMapping[question.entry] ?? ""}
+                            onChange={(event) => updateColumnMapping(question, event.target.value)}
+                          >
+                            <option value="">Không dùng file</option>
+                            {importedData.headers.map((header) => (
+                              <option value={header} key={header}>
+                                {header}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+
                       {question.options.length > 0 ? (
                         <div className="options-box">
                           <div className="options-header">
@@ -634,7 +1007,9 @@ export default function HomePage() {
                                   max={100}
                                   step={1}
                                   value={optionWeights[question.entry]?.[option] ?? 0}
-                                  onChange={(event) => updateOptionWeight(question, option, event.target.valueAsNumber)}
+                                  onChange={(event) =>
+                                    updateOptionWeight(question, option, event.target.valueAsNumber)
+                                  }
                                 />
                                 <strong>%</strong>
                               </label>
@@ -642,7 +1017,17 @@ export default function HomePage() {
                           </div>
                         </div>
                       ) : (
-                        <p className="no-options">Câu hỏi dạng nhập liệu, không có options.</p>
+                        <div className="text-answer-box">
+                          <div className="text-answer-header">
+                            <p>Câu trả lời ngẫu nhiên</p>
+                            <span>{parseTextAnswers(textAnswerBanks[question.entry] ?? "").length} đáp án</span>
+                          </div>
+                          <textarea
+                            value={textAnswerBanks[question.entry] ?? ""}
+                            onChange={(event) => updateTextAnswerBank(question, event.target.value)}
+                            placeholder={"Nhập mỗi đáp án một dòng\nVí dụ:\nLa Roche-Posay\nCocoon\nL'Oreal"}
+                          />
+                        </div>
                       )}
                     </div>
                   ))}
