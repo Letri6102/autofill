@@ -1005,7 +1005,7 @@ export default function HomePage() {
                                   type="number"
                                   min={0}
                                   max={100}
-                                  step={1}
+                                  step={5}
                                   value={optionWeights[question.entry]?.[option] ?? 0}
                                   onChange={(event) =>
                                     updateOptionWeight(question, option, event.target.valueAsNumber)
