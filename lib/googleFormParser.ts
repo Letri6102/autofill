@@ -190,6 +190,7 @@ export function parseGoogleFormHtml(html: string, sourceUrl: string): ParsedGoog
   ];
 
   let currentSection = sections[0];
+  let hasSeenSectionHeader = false;
   let questionOrder = 0;
 
   for (const rawItem of questionsRaw) {
@@ -205,27 +206,27 @@ export function parseGoogleFormHtml(html: string, sourceUrl: string): ParsedGoog
     const isSectionHeader = itemType === 8;
 
     if (isSectionHeader) {
-      if (itemTitle || itemDescription) {
-        const isInitialEmptySection =
-          sections.length === 1 &&
-          currentSection === sections[0] &&
-          currentSection.questions.length === 0 &&
-          currentSection.sectionTitle === "Section 1" &&
-          !currentSection.sectionDescription;
+      const isInitialEmptySection =
+        !hasSeenSectionHeader &&
+        sections.length === 1 &&
+        currentSection === sections[0] &&
+        currentSection.questions.length === 0 &&
+        currentSection.sectionTitle === "Section 1" &&
+        !currentSection.sectionDescription;
 
-        if (isInitialEmptySection) {
-          currentSection.sectionTitle = itemTitle || "Section 1";
-          currentSection.sectionDescription = itemDescription;
-        } else {
-          currentSection = {
-            sectionIndex: sections.length + 1,
-            sectionTitle: itemTitle || `Section ${sections.length + 1}`,
-            sectionDescription: itemDescription,
-            questions: [],
-          };
-          sections.push(currentSection);
-        }
+      if (isInitialEmptySection) {
+        currentSection.sectionTitle = itemTitle || "Section 1";
+        currentSection.sectionDescription = itemDescription;
+      } else {
+        currentSection = {
+          sectionIndex: sections.length + 1,
+          sectionTitle: itemTitle || `Section ${sections.length + 1}`,
+          sectionDescription: itemDescription,
+          questions: [],
+        };
+        sections.push(currentSection);
       }
+      hasSeenSectionHeader = true;
       continue;
     }
 
