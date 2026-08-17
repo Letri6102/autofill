@@ -31,7 +31,7 @@ http://localhost:3000
 ## Lưu ý
 
 - Form phải public hoặc có quyền truy cập không cần đăng nhập.
-- Link dạng `viewform` hoặc `formResponse` đều dùng được.
+- Hỗ trợ link rút gọn `forms.gle`, link `viewform` và `formResponse`.
 - Trình duyệt thường bị CORS khi fetch Google Forms trực tiếp, nên app dùng API route `/api/parse-form` để đọc form ở phía server.
 - Chỉ dùng tính năng submit tự động với form bạn sở hữu hoặc có quyền kiểm thử.
 - File CSV có thể dùng dấu phẩy, chấm phẩy hoặc tab. File Excel hỗ trợ `.xlsx`; nếu là `.xls`, hãy lưu lại thành `.xlsx` hoặc CSV.

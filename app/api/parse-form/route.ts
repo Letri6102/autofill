@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { normalizeGoogleFormUrl, parseGoogleFormHtml } from "@/lib/googleFormParser";
+import {
+  normalizeGoogleFormInputUrl,
+  normalizeGoogleFormUrl,
+  parseGoogleFormHtml,
+} from "@/lib/googleFormParser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,11 +15,12 @@ type ParseRequest = {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as ParseRequest;
-    const sourceUrl = normalizeGoogleFormUrl(body.url ?? "");
+    const inputUrl = normalizeGoogleFormInputUrl(body.url ?? "");
 
-    const response = await fetch(sourceUrl, {
+    const response = await fetch(inputUrl, {
       method: "GET",
       cache: "no-store",
+      redirect: "follow",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -33,6 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const sourceUrl = normalizeGoogleFormUrl(response.url);
     const html = await response.text();
     const parsed = parseGoogleFormHtml(html, sourceUrl);
 

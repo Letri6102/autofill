@@ -80,9 +80,6 @@ type DataFileResponse =
       message: string;
     };
 
-const DEMO_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLSfh2fFBszKCwNAwF2gh6RQBlYkcQFaJaCPwb8Hc9lJb7kQY3g/viewform";
-
 const MAX_FORM_COUNT = 1000;
 const MIN_DELAY_SECONDS = 10;
 const MAX_DELAY_SECONDS = 3600;
@@ -148,7 +145,7 @@ function buildAutoColumnMapping(questions: ParsedQuestion[], headers: string[]):
 }
 
 export default function HomePage() {
-  const [formUrl, setFormUrl] = useState(DEMO_URL);
+  const [formUrl, setFormUrl] = useState("");
   const [data, setData] = useState<ParsedGoogleForm | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -420,6 +417,7 @@ export default function HomePage() {
         return;
       }
 
+      setFormUrl(result.data.sourceUrl);
       setData(result.data);
     } catch {
       setError("Không gọi được API. Hãy kiểm tra server NextJS đang chạy.");
@@ -677,21 +675,26 @@ export default function HomePage() {
           </p>
         </div>
 
-        <form className="form-box" onSubmit={handleSubmit}>
+        <form className="form-box" onSubmit={handleSubmit} autoComplete="off">
           <label htmlFor="formUrl">Link Google Form</label>
           <div className="input-row">
             <input
               id="formUrl"
               value={formUrl}
-              onChange={(event) => setFormUrl(event.target.value)}
-              placeholder="https://docs.google.com/forms/d/e/.../viewform"
+              onChange={(event) => {
+                setFormUrl(event.target.value);
+                setData(null);
+                setError("");
+              }}
+              placeholder="https://forms.gle/... hoặc https://docs.google.com/forms/..."
+              required
             />
             <button type="submit" disabled={loading}>
               {loading ? "Đang đọc..." : "Lấy dữ liệu"}
             </button>
           </div>
           <p className="hint">
-            Có thể dùng link dạng <code>viewform</code> hoặc <code>formResponse</code>.
+            Hỗ trợ link <code>forms.gle</code>, <code>viewform</code> hoặc <code>formResponse</code>.
           </p>
         </form>
       </section>

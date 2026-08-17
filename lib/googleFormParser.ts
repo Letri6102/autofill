@@ -137,24 +137,53 @@ function buildPageHistory(sectionCount: number): string {
   return Array.from({ length: count }, (_, index) => String(index)).join(",");
 }
 
-export function normalizeGoogleFormUrl(rawUrl: string): string {
+function parseGoogleFormUrl(rawUrl: string): URL {
   const trimmed = rawUrl.trim();
   if (!trimmed) throw new Error("Vui lòng nhập link Google Form.");
 
+  const urlWithProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
   let url: URL;
   try {
-    url = new URL(trimmed);
+    url = new URL(urlWithProtocol);
   } catch {
     throw new Error("Link không hợp lệ.");
   }
 
-  if (!url.hostname.includes("docs.google.com")) {
-    throw new Error("Link phải là Google Forms thuộc docs.google.com.");
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Link Google Form phải dùng http hoặc https.");
   }
 
+  url.hash = "";
+  return url;
+}
+
+export function normalizeGoogleFormInputUrl(rawUrl: string): string {
+  const url = parseGoogleFormUrl(rawUrl);
+
+  if (url.hostname === "forms.gle") {
+    if (url.pathname === "/") throw new Error("Link forms.gle chưa đầy đủ.");
+    url.protocol = "https:";
+    return url.toString();
+  }
+
+  return normalizeGoogleFormUrl(url.toString());
+}
+
+export function normalizeGoogleFormUrl(rawUrl: string): string {
+  const url = parseGoogleFormUrl(rawUrl);
+
+  if (url.hostname !== "docs.google.com" || !url.pathname.startsWith("/forms/")) {
+    throw new Error("Link phải thuộc Google Forms (docs.google.com hoặc forms.gle).");
+  }
+
+  url.protocol = "https:";
+
   url.pathname = url.pathname.replace(/\/formResponse\/?$/, "/viewform");
-  if (!url.pathname.includes("/viewform")) {
-    url.pathname = url.pathname.replace(/\/?$/, "/viewform");
+  if (!/\/viewform\/?$/.test(url.pathname)) {
+    const formPath = url.pathname.match(/^(\/forms(?:\/u\/\d+)?\/d\/(?:e\/)?[^/]+)(?:\/.*)?$/)?.[1];
+    if (!formPath) throw new Error("Không nhận ra đường dẫn Google Form.");
+    url.pathname = `${formPath}/viewform`;
   }
 
   return url.toString();
