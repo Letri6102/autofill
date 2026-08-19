@@ -123,7 +123,7 @@ h1 {
 .input-row input,
 .toolbar input,
 .submit-controls input,
-.option-weight-row input,
+.option-weight-row select,
 .column-mapping-row select,
 .text-answer-box textarea {
   width: 100%;
@@ -147,9 +147,9 @@ h1 {
   padding: 0 14px;
 }
 
-.option-weight-row input {
+.option-weight-row select {
   min-height: 38px;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   text-align: right;
 }
 
@@ -163,7 +163,7 @@ h1 {
 .input-row input:focus,
 .toolbar input:focus,
 .submit-controls input:focus,
-.option-weight-row input:focus,
+.option-weight-row select:focus,
 .column-mapping-row select:focus,
 .text-answer-box textarea:focus {
   border-color: var(--primary);
@@ -649,7 +649,7 @@ code {
 
 .option-weight-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 88px 22px;
+  grid-template-columns: minmax(0, 1fr) 96px;
   gap: 8px;
   align-items: center;
 }
@@ -657,11 +657,6 @@ code {
 .option-weight-row span {
   color: #334155;
   line-height: 1.4;
-}
-
-.option-weight-row strong {
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .options-box ul {

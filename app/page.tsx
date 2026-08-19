@@ -84,15 +84,23 @@ const MAX_FORM_COUNT = 1000;
 const MIN_DELAY_SECONDS = 10;
 const MAX_DELAY_SECONDS = 3600;
 const QUESTIONS_PER_PAGE = 5;
+const WEIGHT_STEP = 10;
+const WEIGHT_PERCENTAGES = Array.from({ length: 100 / WEIGHT_STEP + 1 }, (_, index) =>
+  index * WEIGHT_STEP,
+);
 
 function buildDefaultWeights(options: string[]): Record<string, number> {
   if (options.length === 0) return {};
 
-  const baseWeight = Math.floor(100 / options.length);
-  const remainder = 100 - baseWeight * options.length;
+  const totalUnits = 100 / WEIGHT_STEP;
+  const baseUnits = Math.floor(totalUnits / options.length);
+  const remainderUnits = totalUnits - baseUnits * options.length;
 
   return Object.fromEntries(
-    options.map((option, index) => [option, baseWeight + (index === 0 ? remainder : 0)]),
+    options.map((option, index) => [
+      option,
+      (baseUnits + (index < remainderUnits ? 1 : 0)) * WEIGHT_STEP,
+    ]),
   );
 }
 
@@ -485,7 +493,7 @@ export default function HomePage() {
   }
 
   function updateOptionWeight(question: ParsedQuestion, option: string, nextWeight: number) {
-    const safeWeight = clampNumber(Math.round(nextWeight), 0, 100);
+    const safeWeight = clampNumber(Math.round(nextWeight / WEIGHT_STEP) * WEIGHT_STEP, 0, 100);
 
     setOptionWeights((current) => ({
       ...current,
@@ -1004,17 +1012,19 @@ export default function HomePage() {
                             {question.options.map((option) => (
                               <label className="option-weight-row" key={option}>
                                 <span>{option}</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={5}
+                                <select
+                                  aria-label={`Tỷ lệ cho ${option}`}
                                   value={optionWeights[question.entry]?.[option] ?? 0}
                                   onChange={(event) =>
-                                    updateOptionWeight(question, option, event.target.valueAsNumber)
+                                    updateOptionWeight(question, option, Number(event.target.value))
                                   }
-                                />
-                                <strong>%</strong>
+                                >
+                                  {WEIGHT_PERCENTAGES.map((percentage) => (
+                                    <option value={percentage} key={percentage}>
+                                      {percentage}%
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                             ))}
                           </div>
