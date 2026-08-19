@@ -493,7 +493,7 @@ export default function HomePage() {
   }
 
   function updateOptionWeight(question: ParsedQuestion, option: string, nextWeight: number) {
-    const safeWeight = clampNumber(Math.round(nextWeight / WEIGHT_STEP) * WEIGHT_STEP, 0, 100);
+    const safeWeight = clampNumber(Math.round(nextWeight), 0, 100);
 
     setOptionWeights((current) => ({
       ...current,
@@ -1009,24 +1009,44 @@ export default function HomePage() {
                             <span>Tổng {getQuestionWeightTotal(question)}%</span>
                           </div>
                           <div className="option-weight-list">
-                            {question.options.map((option) => (
-                              <label className="option-weight-row" key={option}>
-                                <span>{option}</span>
-                                <select
-                                  aria-label={`Tỷ lệ cho ${option}`}
-                                  value={optionWeights[question.entry]?.[option] ?? 0}
-                                  onChange={(event) =>
-                                    updateOptionWeight(question, option, Number(event.target.value))
-                                  }
-                                >
-                                  {WEIGHT_PERCENTAGES.map((percentage) => (
-                                    <option value={percentage} key={percentage}>
-                                      {percentage}%
+                            {question.options.map((option) => {
+                              const weight = optionWeights[question.entry]?.[option] ?? 0;
+                              const quickWeight = WEIGHT_PERCENTAGES.includes(weight) ? weight : "";
+
+                              return (
+                                <div className="option-weight-row" key={option}>
+                                  <span>{option}</span>
+                                  <input
+                                    aria-label={`Nhập tỷ lệ cho ${option}`}
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step={5}
+                                    value={weight}
+                                    onChange={(event) =>
+                                      updateOptionWeight(question, option, event.target.valueAsNumber)
+                                    }
+                                  />
+                                  <strong>%</strong>
+                                  <select
+                                    aria-label={`Chọn nhanh tỷ lệ cho ${option}`}
+                                    value={quickWeight}
+                                    onChange={(event) =>
+                                      updateOptionWeight(question, option, Number(event.target.value))
+                                    }
+                                  >
+                                    <option value="" disabled>
+                                      Chọn nhanh
                                     </option>
-                                  ))}
-                                </select>
-                              </label>
-                            ))}
+                                    {WEIGHT_PERCENTAGES.map((percentage) => (
+                                      <option value={percentage} key={percentage}>
+                                        {percentage}%
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : (

@@ -123,6 +123,7 @@ h1 {
 .input-row input,
 .toolbar input,
 .submit-controls input,
+.option-weight-row input,
 .option-weight-row select,
 .column-mapping-row select,
 .text-answer-box textarea {
@@ -147,10 +148,18 @@ h1 {
   padding: 0 14px;
 }
 
+.option-weight-row input,
 .option-weight-row select {
   min-height: 38px;
-  padding: 0 28px 0 10px;
+}
+
+.option-weight-row input {
+  padding: 0 10px;
   text-align: right;
+}
+
+.option-weight-row select {
+  padding: 0 28px 0 10px;
 }
 
 .text-answer-box textarea {
@@ -163,6 +172,7 @@ h1 {
 .input-row input:focus,
 .toolbar input:focus,
 .submit-controls input:focus,
+.option-weight-row input:focus,
 .option-weight-row select:focus,
 .column-mapping-row select:focus,
 .text-answer-box textarea:focus {
@@ -649,7 +659,7 @@ code {
 
 .option-weight-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
+  grid-template-columns: minmax(0, 1fr) 78px 20px 112px;
   gap: 8px;
   align-items: center;
 }
@@ -657,6 +667,11 @@ code {
 .option-weight-row span {
   color: #334155;
   line-height: 1.4;
+}
+
+.option-weight-row strong {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .options-box ul {
@@ -715,5 +730,13 @@ code {
   .submit-controls,
   .submit-log-row {
     grid-template-columns: 1fr;
+  }
+
+  .option-weight-row {
+    grid-template-columns: minmax(0, 1fr) 72px 18px;
+  }
+
+  .option-weight-row select {
+    grid-column: 2 / 4;
   }
 }
